@@ -1,0 +1,35 @@
+server:
+  port: 8080
+app:
+  security:
+    jwt:
+      secret-key: ${JWT_SECRET_KEY}
+      expiration: ${JWT_EXPIRATION_ACCESS_TOKEN:240000}
+      refresh-token:
+        expiration: ${JWT_EXPIRATION_REFRESH_TOKEN:604800000}
+  library:
+    rules:
+      max-active-reservation: ${LIBRARY_MAX_ACTIVE_RESERVATION:3}
+      max-active-loans: ${LIBRARY_MAX_ACTIVE_LOANS:3}
+spring:
+  application:
+    name: rent-library-api
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  config:
+    import: optional:file:.env[.properties]
+  datasource:
+    url: ${SPRING_DB_URL}
+    username: ${SPRING_DB_USERNAME}
+    password: ${SPRING_DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: update # cambiar en entorno de producción
+    show-sql: true # cambiar en entorno de producción
+    properties:
+      hibernate:
+        default_batch_fetch_size: 100
+  data:
+    web:
+      pageable:
+        max-page-size: 200

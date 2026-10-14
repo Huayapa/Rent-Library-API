@@ -1,0 +1,142 @@
+-- Extensión
+
+CREATE EXTENSION IF NOT EXISTS unaccent;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- Función para convertir un texto en base (sin caracteres especiales, acentos)
+
+CREATE OR REPLACE FUNCTION unaccent_immutable(text)
+RETURNS text AS $$
+    SELECT public.unaccent('public.unaccent'::regdictionary, $1)
+$$ LANGUAGE sql IMMUTABLE PARALLEL SAFE;
+
+-- Tablas sin relación
+
+CREATE TABLE IF NOT EXISTS authors (
+	id BIGSERIAL PRIMARY KEY,
+	name VARCHAR(255) DEFAULT 'Desconocido' NOT NULL,
+	bio TEXT
+);
+
+CREATE TABLE IF NOT EXISTS publishers (
+	id BIGSERIAL PRIMARY KEY,
+	name VARCHAR(255) UNIQUE NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS categories (
+	id BIGSERIAL PRIMARY KEY,
+	name VARCHAR(255) UNIQUE NOT NULL
+);
+
+-- Tablas con relaciones
+
+CREATE TABLE IF NOT EXISTS books (
+	id BIGSERIAL PRIMARY KEY,
+	isbn VARCHAR(13) UNIQUE NOT NULL,
+	title VARCHAR(255) NOT NULL,
+	description TEXT,
+	release_data DATE,
+	is_published BOOLEAN DEFAULT false NOT NULL,
+	author_id BIGINT REFERENCES authors(id) ON DELETE SET NULL,
+	publisher_id BIGINT REFERENCES publishers(id) ON DELETE SET NULL,
+	scheduled_publish_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+    deleted_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS copies (
+	id BIGSERIAL PRIMARY KEY,
+	inventory_code VARCHAR(50) UNIQUE NOT NULL,
+	book_id BIGINT NOT NULL REFERENCES books(id) ON DELETE RESTRICT,
+	status VARCHAR(20) NOT NULL DEFAULT 'AVAILABLE'
+		CONSTRAINT chk_copy_status CHECK (status IN ('AVAILABLE', 'LOANED', 'RESERVED', 'DAMAGED', 'LOST')),
+	deleted_at TIMESTAMPTZ
+);
+
+
+CREATE TABLE IF NOT EXISTS users (
+	id BIGSERIAL PRIMARY KEY,
+	dni CHAR(8) UNIQUE NOT NULL,
+	name VARCHAR(120) NOT NULL,
+	email VARCHAR(255) UNIQUE NOT NULL,
+	password_hash VARCHAR(255) NOT NULL,
+	role VARCHAR(20) NOT NULL DEFAULT 'MEMBER'
+		CONSTRAINT chk_user_role CHECK (role IN ('MEMBER', 'ADMIN', 'LIBRARIAN')),
+	deleted_at TIMESTAMPTZ
+);
+
+
+CREATE TABLE IF NOT EXISTS tokens(
+	id BIGSERIAL PRIMARY KEY,
+	token_id VARCHAR(36) UNIQUE NOT NULL,
+	token TEXT NOT NULL,
+	token_type VARCHAR(50) NOT NULL DEFAULT 'BEARER'
+		CONSTRAINT chk_token_type CHECK (token_type IN ('BEARER')),
+	expiry_date TIMESTAMPTZ NOT NULL,
+	issued_at TIMESTAMPTZ DEFAULT now(),
+	is_revoked BOOLEAN DEFAULT false,
+	device_info VARCHAR(255),
+	user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS loans (
+	id BIGSERIAL PRIMARY KEY,
+	copy_id BIGINT NOT NULL REFERENCES copies(id) ON DELETE RESTRICT,
+	user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+	loaned_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+	due_at TIMESTAMPTZ NOT NULL,
+	returned_at TIMESTAMPTZ,
+	status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'
+		CONSTRAINT chk_loan_status CHECK (status IN ('ACTIVE', 'RETURNED', 'OVERDUE')),
+	deleted_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS reservations (
+	id BIGSERIAL PRIMARY KEY,
+	copy_id BIGINT NOT NULL REFERENCES copies(id) ON DELETE RESTRICT,
+	user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+	reserved_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+	expires_at TIMESTAMPTZ,
+	status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
+		CONSTRAINT chk_reservation_status CHECK (status IN ('PENDING', 'FULFILLED', 'CANCELLED', 'EXPIRED')),
+	deleted_at TIMESTAMPTZ
+);
+
+-- Tablas de relación muchos a muchos
+
+CREATE TABLE IF NOT EXISTS book_categories (
+	book_id BIGINT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+	category_id BIGINT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+	PRIMARY KEY (book_id, category_id)
+);
+
+-- Función que cambia la fecha de actualizacion en cada UPDATE
+
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+	NEW.updated_at = now();
+	RETURN NEW;
+END
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_books_updated_at
+BEFORE UPDATE ON books
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+-- Para buscar de forma eficiente usando B-Tree
+
+--- Las entradas se ordenan por book_id y status
+CREATE INDEX idx_copies_book_status ON copies(book_id, status);
+
+--- Garantizar que las categorias no sean duplicadas
+CREATE UNIQUE INDEX ux_category_normalize
+ON categories (unaccent_immutable(lower(name)));
+
+-- Crear usuario administrador
+
+INSERT INTO users(dni, name, email, password_hash, role)
+VALUES (88392832, 'admin', 'admin@gmail.com',
+        crypt('123456789', gen_salt('bf', 10)), 'ADMIN');
