@@ -6,6 +6,10 @@
 API REST para la gestión de una biblioteca fisica: catálogo de libros, copias físicas, préstamos y reservas, 
 con autenticación basada en JWT y control de sesiones.
 
+Credenciales de usuario administrator por defecto: \
+admin@gmail.com \
+123456789
+
 ## Funcionalidades
 
 - Autenticación con JWT (access token y refresh token)
